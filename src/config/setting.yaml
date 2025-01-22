@@ -1,0 +1,13 @@
+# Planner Model Settings
+planner_model:
+  model_type: "bedrock"
+  model_id: "us.anthropic.claude-3-haiku-20240307-v1:0"
+  max_token: 4096
+  temperature: 0.3
+
+# Response Model Settings
+response_model:
+  model_type: "bedrock"
+  model_id: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+  max_token: 4096
+  temperature: 0.3
