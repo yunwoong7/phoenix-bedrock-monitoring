@@ -7,10 +7,12 @@ from src.agent.llm.llm_interface import LLMChat
 from src.agent.states.schemas import AgentState, Task
 import time
 
+# ===== Define the Executor class =====
 class Executor:
-    def __init__(self, llm: LLMChat, tools: list[StructuredTool]) -> None:
+    def __init__(self, llm: LLMChat, tools: list[StructuredTool], verbose: bool = False) -> None:
         self.model = llm.model
         self.tools = {tool.name: tool for tool in tools}
+        self.verbose = verbose
 
     def __call__(self, state: AgentState) -> AgentState:
         """Execute remaining tasks in the plan"""
@@ -21,13 +23,14 @@ class Executor:
         executed_tasks = []
         remaining_tasks = []
 
-        print(Fore.GREEN + "\n🎯 Executing tasks:" + Style.RESET_ALL)
-        start_time = time.time()
+        print(Fore.GREEN + "\n🎯 Executing tasks" + Style.RESET_ALL)
 
-        task = state.plan.tasks.pop(0)
-        print(Fore.WHITE + "────────────────────────────────────────────────────" + Style.RESET_ALL)
-        print(Fore.WHITE + f"▶️ Executing task: {task.title}" + Style.RESET_ALL)
+        if self.verbose:
+            print(Fore.WHITE + "────────────────────────────────────────────────────" + Style.RESET_ALL)
+            print(Fore.WHITE + f"▶️ Executing task: {task.title}" + Style.RESET_ALL)
+
         tool_start_time = time.time()
+        task = state.plan.tasks.pop(0)
         tool = self.tools[task.tool_name]
 
         try:
@@ -48,7 +51,7 @@ class Executor:
             })
             remaining_tasks.append(task)
         
-        # 실행 결과를 state에 저장
+        # Save execution results
         return {
             **state.model_dump(),
             "executed_tasks": executed_tasks,

@@ -4,20 +4,19 @@ import time
 from dotenv import load_dotenv
 from typing import Dict, Optional, List, Union
 from tavily import TavilyClient
-import requests
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 import concurrent.futures
 
 load_dotenv()
 
-BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY")
+# ===== Load environment variables =====
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-MAX_SEARCH_THREADS = int(os.environ.get("MAX_SEARCH_THREADS", 3))  # Convert to integer
-MAX_SEARCH_RESULTS = int(os.environ.get("MAX_SEARCH_RESULTS", 3))  # Convert to integer
-
+MAX_SEARCH_THREADS = int(os.environ.get("MAX_SEARCH_THREADS", 3)) 
+MAX_SEARCH_RESULTS = int(os.environ.get("MAX_SEARCH_RESULTS", 3)) 
 TAVILY_CLIENT = TavilyClient(api_key=TAVILY_API_KEY)
 
+# ===== Define the structure of the search input =====
 class SearchInput(BaseModel):
     """
     Input schema for web search operations. 
@@ -36,88 +35,8 @@ class SearchInput(BaseModel):
         ),
     )
 
-# Brave search tool
-class BraveSearch:
-    """
-    Searches given queries on the web and returns the search results.
-
-    ## Tool Parameters
-    - queries (list[str]): The search query strings that will be used to perform the web search.
-
-    ### Query generation instructions
-    For each element of the queries parameter, please follow the guidelines below:
-     - Generate 2-3 relevant search queries based on a given task to web searches.
-     - Each query should capture the main intent of the task in different perspectives or contexts.
-    """
-    def __init__(self):
-        self.api_key = BRAVE_API_KEY
-        self.base_url = "https://api.search.brave.com/res/v1/web/search"
-        
-    def search(self, query: str, count: Optional[int] = MAX_SEARCH_RESULTS) -> Dict:
-        headers = {
-            "Accept": "application/json",
-            "X-Subscription-Token": self.api_key
-        }
-        
-        params = {
-            "q": query,
-            "count": count
-        }
-        
-        try:
-            response = requests.get(
-                self.base_url,
-                headers=headers,
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Error in Brave search: {str(e)}")
-            raise e
-
-    def get_search_results(self, queries: Union[str, List[str]], results: Optional[Dict] = None) -> str:
-        if isinstance(queries, str):
-            queries = [queries]
-        
-        formatted_results = []
-
-        for query in queries:
-            time.sleep(1)  # Add delay to avoid rate limiting
-            search_results = self.search(query)
-            for result in search_results.get('web', {}).get('results', []):
-                formatted_results.append(
-                    f"Title: {result.get('title')}\n"
-                    f"Description: {result.get('description')}\n"
-                    f"URL: {result.get('url')}\n"
-                )
-            
-        return "\n\n".join(formatted_results)
-
-    def get_tool(self) -> StructuredTool:
-        """Get the web search tool"""
-        return StructuredTool.from_function(
-            func=self.get_search_results,
-            name="brave_web_search",
-            description=self.__doc__,
-            args_schema=SearchInput,
-            return_direct=True
-        )
-
-
-# Tavily search tool
+# ===== Define the Tavily search class =====
 class TavilySearch:
-    """
-    Searches given queries on the web and returns the search results.
-
-    ## Tool Parameters
-    - queries (list[str]): The search query strings that will be used to perform the web search.
-
-    ### Query generation instructions
-    For each element of the queries parameter, please follow the guidelines below:
-        - Generate 2-3 relevant search queries based on a given task to web searches.
-        - Each query should capture the main intent of the task in different perspectives or contexts.
-    """
     def __init__(self):
         pass
 
@@ -131,34 +50,62 @@ class TavilySearch:
             print(f"Error in Tavily search: {str(e)}")
             raise e
 
-    def get_search_results(self, queries: Union[str, List[str]]) -> str:
+    def get_search_results(self, queries: Union[str, List[str]]) -> Dict[str, Union[List[Dict], str]]:
+        """
+        Execute search and return both structured list and LLM-formatted text results
+        
+        Args:
+            queries: Single query string or list of queries
+            
+        Returns:
+            Dict containing:
+                - 'results': List of result dictionaries for DataFrame conversion
+                - 'llm_text': Formatted text for LLM input
+        """
         if isinstance(queries, str):
             queries = [queries]
 
-        all_results = []
+        results_for_df = []
+        llm_formatted = []
 
-        def search_and_format(query: str) -> str:
+        def search_and_process(query: str) -> tuple[list, str]:
             print(f"Searching for: {query}")
             start_time = time.time()
             
             results = self.search(query)
-            formatted = [f"Results for: {query}"]
+            df_results = []
+            text_parts = [f"Results for: {query}"]
             
             for result in results.get('results', []):
-                formatted.append(
-                    f"Title: {result.get('title')}\n"
-                    f"Description: {result.get('content')}\n"
-                    f"URL: {result.get('url')}\n"
-                )
+                # Make sure the result has the necessary fields
+                df_results.append({
+                    'query': query,
+                    'title': result.get('title', ''),
+                    'content': result.get('content', ''),
+                    'url': result.get('url', ''),
+                    'score': result.get('score', 0.0),
+                    'published_date': result.get('published_date', '')
+                })
+                
+                # Add the result details to the LLM-formatted text
+                text_parts.extend([
+                    f"title: {result.get('title')}",
+                    f"description: {result.get('content')}",
+                    f"url: {result.get('url')}",
+                    ""
+                ])
             
-            elapsed_time = time.time() - start_time
-            return "\n".join(formatted)
+            return df_results, "\n".join(text_parts)
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), 3)) as executor:
-            search_results = list(executor.map(search_and_format, queries))
-            all_results.extend(search_results)
+            for df_items, text_result in executor.map(search_and_process, queries):
+                results_for_df.extend(df_items)
+                llm_formatted.append(text_result)
 
-        return "\n\n".join(all_results)
+        return {
+            'results': results_for_df,
+            'llm_text': "\n\n".join(llm_formatted)
+        }
 
     def get_tool(self) -> StructuredTool:
         return StructuredTool.from_function(
@@ -169,27 +116,24 @@ class TavilySearch:
             return_direct=True
         )
 
+
 if __name__ == "__main__":
-    # Basic test
     try:
         print("Starting Web Search test...")
-        
-        # Create search instance
         search = TavilySearch()
+        test_queries = ["Python programming language news", "Latest AI advancements"]
+        results = search.get_search_results(test_queries)
         
-        # Get tool
-        search_tool = search.get_tool()
-        print("\nTool name:", search_tool.name)
-        print("Tool description:", search_tool.description)
+        # Test conversion to DataFrame
+        import pandas as pd
+        df = pd.DataFrame(results['results'])
+        print("\nDataFrame Preview:")
+        print(df.head())
+        print("\nDataFrame Columns:", df.columns.tolist())
         
-        # Test query
-        test_query = ["Python programming language news", "Latest AI advancements"]
-        print(f"\nTest queries: {test_query}")
-        
-        # Execute search using the tool
-        formatted_results = search_tool.func(queries=test_query)
-        print("\nSearch results:")
-        print(formatted_results)
+        # Test LLM-formatted text
+        print("\nLLM Formatted Text:")
+        print(results['llm_text'])
         
         print("\nTest completed: Success ✅")
         
