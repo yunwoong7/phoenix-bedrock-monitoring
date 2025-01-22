@@ -4,7 +4,7 @@ AI Research Assistant with Plan-Execute Pattern
 
 <div align="center">
   <img src="https://img.shields.io/badge/python-v3.12.7-blue.svg"/>
-  <img src="https://img.shields.io/badge/boto3-v1.35.91-blue.svg"/>
+  <img src="https://img.shields.io/badge/langgraph-v0.2.61-blue.svg"/>
   <img src="https://img.shields.io/badge/streamlit-v1.41.1-blue.svg"/>
 </div>
 
